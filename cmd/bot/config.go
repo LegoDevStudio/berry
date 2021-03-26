@@ -41,8 +41,18 @@ func getConfig(sugar *zap.SugaredLogger) (config *structs.BotConfig) {
 	if os.Getenv("TERMBOT_DB_URL") != "" {
 		config.Auth.DatabaseURL = os.Getenv("TERMBOT_DB_URL")
 	}
+	if os.Getenv("TERMBOT_SENTRY_URL") != "" {
+		config.Auth.SentryURL = os.Getenv("TERMBOT_SENTRY_URL")
+	}
+	if os.Getenv("TERMBOT_GIT") != "" {
+		config.Bot.Git = os.Getenv("TERMBOT_GIT")
+	}
+	if os.Getenv("TERMBOT_TOKEN") != "" {
+		config.Auth.Token = os.Getenv("TERMBOT_TOKEN")
+	}
+	
 	config.UseSentry = config.Auth.SentryURL != ""
-
+	
 	if config.Bot.Git == "" {
 		config.Bot.Git = structs.FallbackGitURL
 	}
