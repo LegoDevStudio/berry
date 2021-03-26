@@ -14,11 +14,15 @@ import (
 
 var msgRegex = regexp.MustCompile(`\*\*Name:\*\* (.*)\n\*\*Category:\*\* (.*)\n\*\*Description:\*\* ([\s\S]*)\n\*\*Coined by:\*\* (.*)`)
 
+var tagsRegex = regexp.MustCompile(`\*\*Tags:\*\* (.*)`)
+
 func (c *Admin) importFromMessage(ctx *bcr.Context) (err error) {
 	var flag string
+	var rawSource bool
 
 	fs := pflag.NewFlagSet("", pflag.ContinueOnError)
 	fs.StringVarP(&flag, "category", "c", "", "Category")
+	fs.BoolVarP(&rawSource, "raw-source", "r", false, "Use the provided source as-is")
 	fs.Parse(ctx.Args)
 	ctx.Args = fs.Args()
 
@@ -47,6 +51,12 @@ func (c *Admin) importFromMessage(ctx *bcr.Context) (err error) {
 					aliases[i] = strings.TrimSpace(aliases[i])
 				}
 				t.Aliases = aliases
+			case "Tags":
+				tags := strings.Split(f.Value, ",")
+				for i := range tags {
+					tags[i] = strings.TrimSpace(tags[i])
+				}
+				t.Tags = tags
 			case "Description":
 				t.Description = f.Value
 			case "Source":
@@ -91,6 +101,14 @@ func (c *Admin) importFromMessage(ctx *bcr.Context) (err error) {
 
 		t.Description = groups[3]
 		t.Source = groups[4]
+
+		if g := tagsRegex.FindStringSubmatch(msg.Content); len(g) > 1 {
+			tags := strings.Split(g[1], ",")
+			for i := range tags {
+				tags[i] = strings.TrimSpace(tags[i])
+			}
+			t.Tags = tags
+		}
 	}
 
 done:
@@ -101,6 +119,9 @@ done:
 	}
 	if t.Aliases == nil {
 		t.Aliases = []string{}
+	}
+	if !rawSource && !bcr.HasAnyPrefix(t.Source, "Coined by", "Unknown", "unknown") {
+		t.Source = fmt.Sprintf("Coined by %v", t.Source)
 	}
 
 	if t.Category == 0 {
@@ -114,8 +135,12 @@ done:
 			_, err = ctx.Sendf("That category (``%v``) could not be found.", bcr.EscapeBackticks(flag))
 		}
 		t.Category = cat
-		t.CategoryName = flag
 	}
+
+	// add the category to the tags
+	cat := c.DB.CategoryFromID(t.Category)
+	t.CategoryName = cat.Name
+	t.Tags = append(t.Tags, cat.Name)
 
 	termMsg, err := ctx.Send("Do you want to add this term?", t.TermEmbed(c.Config.TermBaseURL()))
 	if err != nil {
@@ -142,12 +167,12 @@ done:
 	}
 
 	// if we don't have perms return
-	if p, _ := ctx.Session.Permissions(msg.ChannelID, ctx.Bot.ID); !p.Has(discord.PermissionAddReactions | discord.PermissionReadMessageHistory) {
+	if p, _ := ctx.State.Permissions(msg.ChannelID, ctx.Bot.ID); !p.Has(discord.PermissionAddReactions | discord.PermissionReadMessageHistory) {
 		return
 	}
 
 	// react with a checkmark to the original message
-	ctx.Session.React(msg.ChannelID, msg.ID, "yes:822929172669136966")
+	ctx.State.React(msg.ChannelID, msg.ID, "yes:822929172669136966")
 
 	// if logging terms is enabled, log this
 	if c.WebhookClient != nil {
@@ -156,6 +181,8 @@ done:
 		c.WebhookClient.Execute(webhook.ExecuteData{
 			Username:  ctx.Bot.Username,
 			AvatarURL: ctx.Bot.AvatarURL(),
+
+			Content: "​",
 
 			Embeds: []discord.Embed{
 				{
